@@ -1,0 +1,156 @@
+import fs from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+
+export type MemoryConfig = {
+  embedding: {
+    provider: "openai";
+    model?: string;
+    apiKey: string;
+    baseUrl?: string;
+  };
+  dbPath?: string;
+  autoCapture?: boolean;
+  autoRecall?: boolean;
+  captureMaxChars?: number;
+};
+
+export const MEMORY_CATEGORIES = ["preference", "fact", "decision", "entity", "other"] as const;
+export type MemoryCategory = (typeof MEMORY_CATEGORIES)[number];
+
+const DEFAULT_MODEL = "text-embedding-3-small";
+export const DEFAULT_CAPTURE_MAX_CHARS = 500;
+
+function resolveDefaultDbPath(): string {
+  const home = homedir();
+  return join(home, ".openclaw", "memory", "lancedb");
+}
+
+const DEFAULT_DB_PATH = resolveDefaultDbPath();
+
+/**
+ * Known embedding dimensions. For unknown models, defaults to 768
+ * which covers most open-source models (nomic-embed, BGE, etc.)
+ */
+const EMBEDDING_DIMENSIONS: Record<string, number> = {
+  "text-embedding-3-small": 1536,
+  "text-embedding-3-large": 3072,
+  "text-embedding-ada-002": 1536,
+  "nomic-embed-text": 768,
+  "nomic-embed-text-v1.5": 768,
+  "nomic-embed-text-v2-moe": 768,
+  "mxbai-embed-large": 1024,
+  "all-minilm": 384,
+  "bge-large-en-v1.5": 1024,
+  "bge-m3": 1024,
+  "snowflake-arctic-embed": 1024,
+};
+
+function assertAllowedKeys(value: Record<string, unknown>, allowed: string[], label: string) {
+  const unknown = Object.keys(value).filter((key) => !allowed.includes(key));
+  if (unknown.length === 0) {
+    return;
+  }
+  throw new Error(`${label} has unknown keys: ${unknown.join(", ")}`);
+}
+
+export function vectorDimsForModel(model: string): number {
+  return EMBEDDING_DIMENSIONS[model] ?? 768;
+}
+
+function resolveEnvVars(value: string): string {
+  return value.replace(/\$\{([^}]+)\}/g, (_, envVar) => {
+    const envValue = process.env[envVar];
+    if (!envValue) {
+      throw new Error(`Environment variable ${envVar} is not set`);
+    }
+    return envValue;
+  });
+}
+
+function resolveEmbeddingModel(embedding: Record<string, unknown>): string {
+  const model = typeof embedding.model === "string" ? embedding.model : DEFAULT_MODEL;
+  vectorDimsForModel(model);
+  return model;
+}
+
+export const memoryConfigSchema = {
+  parse(value: unknown): MemoryConfig {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new Error("memory config required");
+    }
+    const cfg = value as Record<string, unknown>;
+    assertAllowedKeys(
+      cfg,
+      ["embedding", "dbPath", "autoCapture", "autoRecall", "captureMaxChars"],
+      "memory config",
+    );
+
+    const embedding = cfg.embedding as Record<string, unknown> | undefined;
+    if (!embedding || typeof embedding.apiKey !== "string") {
+      throw new Error("embedding.apiKey is required");
+    }
+    assertAllowedKeys(embedding, ["apiKey", "model", "baseUrl"], "embedding config");
+
+    const model = resolveEmbeddingModel(embedding);
+
+    const captureMaxChars =
+      typeof cfg.captureMaxChars === "number" ? Math.floor(cfg.captureMaxChars) : undefined;
+    if (
+      typeof captureMaxChars === "number" &&
+      (captureMaxChars < 100 || captureMaxChars > 10_000)
+    ) {
+      throw new Error("captureMaxChars must be between 100 and 10000");
+    }
+
+    return {
+      embedding: {
+        provider: "openai",
+        baseUrl: typeof embedding.baseUrl === "string" ? embedding.baseUrl : undefined,
+        model,
+        apiKey: resolveEnvVars(embedding.apiKey),
+      },
+      dbPath: typeof cfg.dbPath === "string" ? cfg.dbPath : DEFAULT_DB_PATH,
+      autoCapture: cfg.autoCapture === true,
+      autoRecall: cfg.autoRecall !== false,
+      captureMaxChars: captureMaxChars ?? DEFAULT_CAPTURE_MAX_CHARS,
+    };
+  },
+  uiHints: {
+    "embedding.apiKey": {
+      label: "API Key",
+      sensitive: true,
+      placeholder: "sk-... or your-api-key",
+      help: "API key for your embedding provider (or use ${ENV_VAR})",
+    },
+    "embedding.model": {
+      label: "Embedding Model",
+      placeholder: DEFAULT_MODEL,
+      help: "Embedding model name (e.g. nomic-embed-text-v2-moe, text-embedding-3-small)",
+    },
+    "embedding.baseUrl": {
+      label: "Base URL",
+      placeholder: "https://api.openai.com/v1",
+      help: "Custom endpoint URL (Ollama, LM Studio, vLLM, or any OpenAI-compatible API)",
+    },
+    dbPath: {
+      label: "Database Path",
+      placeholder: "~/.openclaw/memory/lancedb",
+      advanced: true,
+    },
+    autoCapture: {
+      label: "Auto-Capture",
+      help: "Automatically capture important information from conversations",
+    },
+    autoRecall: {
+      label: "Auto-Recall",
+      help: "Automatically inject relevant memories into context",
+    },
+    captureMaxChars: {
+      label: "Capture Max Chars",
+      help: "Maximum message length eligible for auto-capture",
+      advanced: true,
+      placeholder: String(DEFAULT_CAPTURE_MAX_CHARS),
+    },
+  },
+};

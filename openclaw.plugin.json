@@ -1,0 +1,76 @@
+{
+  "id": "memory-lancedb",
+  "kind": "memory",
+  "uiHints": {
+    "embedding.apiKey": {
+      "label": "API Key",
+      "sensitive": true,
+      "placeholder": "sk-... or your-api-key",
+      "help": "API key for your embedding provider (or use ${ENV_VAR})"
+    },
+    "embedding.model": {
+      "label": "Embedding Model",
+      "placeholder": "text-embedding-3-small",
+      "help": "Any embedding model name (e.g. nomic-embed-text-v2-moe, bge-large-en-v1.5)"
+    },
+    "embedding.baseUrl": {
+      "label": "Base URL",
+      "placeholder": "https://api.openai.com/v1",
+      "help": "Custom endpoint URL (Ollama, LM Studio, vLLM, or any OpenAI-compatible API)"
+    },
+    "dbPath": {
+      "label": "Database Path",
+      "placeholder": "~/.openclaw/memory/lancedb",
+      "advanced": true
+    },
+    "autoCapture": {
+      "label": "Auto-Capture",
+      "help": "Automatically capture important information from conversations"
+    },
+    "autoRecall": {
+      "label": "Auto-Recall",
+      "help": "Automatically inject relevant memories into context"
+    },
+    "captureMaxChars": {
+      "label": "Capture Max Chars",
+      "help": "Maximum message length eligible for auto-capture",
+      "advanced": true,
+      "placeholder": "500"
+    }
+  },
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "embedding": {
+        "type": "object",
+        "properties": {
+          "apiKey": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "baseUrl": {
+            "type": "string"
+          }
+        },
+        "required": ["apiKey"]
+      },
+      "dbPath": {
+        "type": "string"
+      },
+      "autoCapture": {
+        "type": "boolean"
+      },
+      "autoRecall": {
+        "type": "boolean"
+      },
+      "captureMaxChars": {
+        "type": "number",
+        "minimum": 100,
+        "maximum": 10000
+      }
+    },
+    "required": ["embedding"]
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "name": "openclaw-memory-lancedb-custom",
+  "version": "1.0.0",
+  "description": "OpenClaw LanceDB memory plugin with custom embedding endpoint support (Ollama, LM Studio, vLLM, etc.) and multi-agent isolation",
+  "license": "MIT",
+  "keywords": [
+    "openclaw",
+    "memory",
+    "lancedb",
+    "ollama",
+    "embeddings",
+    "vector-search",
+    "multi-agent"
+  ],
+  "openclaw": {
+    "extensions": {
+      "memory-lancedb": {
+        "entry": "index.ts",
+        "config": "openclaw.plugin.json"
+      }
+    }
+  },
+  "dependencies": {
+    "@lancedb/lancedb": "^0.15.0",
+    "@sinclair/typebox": "^0.34.0",
+    "openai": "^4.0.0"
+  }
+}
