@@ -19,6 +19,15 @@
 # =============================================================================
 set -e
 
+# Cross-platform sed in-place
+sedi() {
+  if [[ "$OSTYPE" == "darwin"* ]]; then
+    sed -i '' "$@"
+  else
+    sed -i "$@"
+  fi
+}
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # Auto-detect OpenClaw install path
@@ -46,7 +55,7 @@ fi
 # Detect OpenClaw version
 OC_VERSION="unknown"
 if command -v openclaw &>/dev/null; then
-  OC_VERSION=$(openclaw --version 2>&1 | head -1 | grep -oP '\d+\.\d+\.\d+' || echo "unknown")
+  OC_VERSION=$(openclaw --version 2>&1 | tr -d '[:space:]')
 fi
 echo "OpenClaw version: $OC_VERSION"
 echo "Plugin dir: $PLUGIN_DIR"
@@ -90,7 +99,7 @@ NEEDS_PATCH=false
 PATCHED=0
 
 # Detection: check if any dist/manager-*.js still has the old enum restriction
-# Newer OpenClaw versions use "type":"string" for model and support baseUrl — if we see
+# Newer OpenClaw uses "type":"string" for model and supports baseUrl — if we see
 # the old enum, this is an older version that needs patching
 for f in dist/manager-*.js; do
   [ -f "$f" ] || continue
@@ -106,11 +115,11 @@ if [ "$NEEDS_PATCH" = true ]; then
     [ -f "$f" ] || continue
     if grep -q "text-embedding-3-small" "$f" 2>/dev/null; then
       # Replace model enum with generic string type
-      sed -i 's/"enum":\["text-embedding-3-small","text-embedding-3-large"\]/"type":"string"/g' "$f"
-      # Add baseUrl to schema properties
-      sed -i 's/"additionalProperties":false,"properties":{"apiKey":{"type":"string"},"model"/"properties":{"apiKey":{"type":"string"},"baseUrl":{"type":"string"},"dimensions":{"type":"number"},"model"/g' "$f"
+      sedi 's/"enum":\["text-embedding-3-small","text-embedding-3-large"\]/"type":"string"/g' "$f"
+      # Add baseUrl and dimensions to schema properties
+      sedi 's/"additionalProperties":false,"properties":{"apiKey":{"type":"string"},"model"/"properties":{"apiKey":{"type":"string"},"baseUrl":{"type":"string"},"dimensions":{"type":"number"},"model"/g' "$f"
       # Remove required apiKey constraint (allows "ollama" placeholder)
-      sed -i 's/"required":\["apiKey"\]/"required":[]/g' "$f"
+      sedi 's/"required":\["apiKey"\]/"required":[]/g' "$f"
       PATCHED=$((PATCHED + 1))
     fi
   done

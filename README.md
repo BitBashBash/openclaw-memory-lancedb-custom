@@ -13,13 +13,15 @@
 | **Extended embedding dimensions map (12+ models)** | ❌ (2 models) | ✅ |
 | **Graceful 768-dim fallback for unknown models** | ❌ (throws error) | ✅ |
 
-### agentId Isolation
+## Requirements
 
-Each agent passes its name as `agentId` when storing/recalling memories. Memories are filtered so agents only see their own memories plus `"shared"` memories. This prevents cross-contamination between agents like Maya (business ops) and Nova (personal assistant).
+- OpenClaw 2026.2.x+
+- Node.js 22+
+- An OpenAI-compatible embedding endpoint
 
 ## Compatibility
 
-- **Newer OpenClaw releases**: Install just copies 3 source files. No dist patching needed.
+- **Newer OpenClaw releases**: Stock supports baseUrl/dimensions natively — install just copies 3 source files. No dist patching needed.
 - **Older OpenClaw releases**: Installer auto-detects and applies dist patches for schema validation bypass.
 
 The installer handles both cases automatically — you don't need to think about it.
@@ -32,6 +34,15 @@ cd openclaw-memory-lancedb-custom
 chmod +x install.sh
 ./install.sh
 ```
+
+The installer auto-detects your OpenClaw install path on both Linux and macOS (Homebrew).
+
+> **macOS note:** If LanceDB fails to install, you may need Xcode Command Line Tools:
+> ```bash
+> xcode-select --install
+> cd "$(npm root -g)/openclaw"
+> npm install @lancedb/lancedb --build-from-source --legacy-peer-deps
+> ```
 
 ## Configuration
 
@@ -75,6 +86,19 @@ Then restart: `openclaw gateway restart`
 | `autoRecall` | boolean | `true` | Auto-inject relevant memories into context |
 | `captureMaxChars` | number | `500` | Max message length for auto-capture (100–10000) |
 
+## Embedding Providers
+
+Works with any OpenAI-compatible `/v1/embeddings` endpoint:
+
+| Provider | baseUrl | Example Model |
+|----------|---------|---------------|
+| **OpenAI** | *(omit — uses default)* | `text-embedding-3-small` |
+| **Ollama** | `http://localhost:11434/v1` | `nomic-embed-text-v2-moe` |
+| **LM Studio** | `http://localhost:1234/v1` | `nomic-embed-text-v1.5-GGUF` |
+| **vLLM** | `http://localhost:8000/v1` | `BAAI/bge-large-en-v1.5` |
+| **LocalAI** | `http://localhost:8080/v1` | `bert-cpp-minilm-v6` |
+| **text-embeddings-inference** | `http://localhost:8081` | `BAAI/bge-m3` |
+
 ### Supported Embedding Models (Built-in Dimensions)
 
 | Model | Dimensions |
@@ -92,6 +116,50 @@ Then restart: `openclaw gateway restart`
 
 Use the `dimensions` config field to override for models not in this list.
 
+## Multi-Agent Isolation
+
+If you run multiple agents on one OpenClaw instance, use `agentId` to keep their memories separate.
+
+### How it works
+
+Each memory is tagged with an `agentId` field. When an agent passes their ID to `memory_recall`, they only see:
+- Memories tagged with their own ID
+- Memories tagged as `"shared"` (no agent specified)
+
+Memories from other agents are filtered out.
+
+### Setup
+
+**1. Disable autoCapture and autoRecall** (they lack agent context):
+
+```json
+"memory-lancedb": {
+  "config": {
+    "autoCapture": false,
+    "autoRecall": false
+  }
+}
+```
+
+**2. Add memory rules to each agent's PLAYBOOK.md or SOUL.md:**
+
+```markdown
+## Memory Rules
+- When using memory_store or memory_recall, ALWAYS pass agentId: "your-agent-name"
+```
+
+**3. Test isolation:**
+
+```
+# Agent A: "Remember my favorite color is blue"     → stored with agentId: "agent-a"
+# Agent B: "What is my favorite color?"              → no results
+# Agent A: "What is my favorite color?"              → "blue"
+```
+
+### Single agent?
+
+If you only have one agent, ignore agentId entirely — everything works without it. Memories are tagged `"shared"` by default.
+
 ## Updating OpenClaw
 
 After running `openclaw update`, re-run the installer to reapply custom files:
@@ -100,28 +168,25 @@ After running `openclaw update`, re-run the installer to reapply custom files:
 cd /path/to/openclaw-memory-lancedb-custom
 git pull
 ./install.sh
+openclaw gateway restart
 ```
 
-Or use the automated update script:
+Or use the included update script which handles everything (backup → update → re-apply → restart):
 
 ```bash
-#!/usr/bin/env bash
-set -euo pipefail
+./scripts/openclaw-update.sh
+```
 
-REPO_DIR="/home/ubuntu/openclaw-memory-lancedb-custom"
-echo "=== OpenClaw Update + Custom LanceDB ==="
+To set up the scripts for first-time use:
 
-# 1. Update OpenClaw
-openclaw update --no-restart --yes
-echo "Updated to: $(openclaw --version 2>&1 | head -1)"
+```bash
+# Copy to your scripts directory
+cp scripts/openclaw-update.sh ~/scripts/
+cp scripts/pre-update-backup.sh ~/scripts/
+chmod +x ~/scripts/openclaw-update.sh ~/scripts/pre-update-backup.sh
 
-# 2. Pull + reinstall custom plugin
-cd "$REPO_DIR" && git pull --ff-only
-./install.sh
-
-# 3. Restart
-openclaw gateway restart
-echo "=== Done ==="
+# Run future updates with one command
+~/scripts/openclaw-update.sh
 ```
 
 ## CLI Commands
@@ -129,7 +194,7 @@ echo "=== Done ==="
 ```bash
 openclaw ltm list              # Count total memories
 openclaw ltm search "query"    # Search memories (--limit N)
-openclaw ltm stats             # Show statistics
+openclaw ltm stats             # Memory statistics
 ```
 
 ## Tools Available to Agents
@@ -140,6 +205,12 @@ openclaw ltm stats             # Show statistics
 | `memory_store` | Store new memories with agentId tagging and dedup |
 | `memory_forget` | Delete memories by ID or search query (GDPR-compliant) |
 
+## Data Location
+
+- **Vector database:** `~/.openclaw/memory/lancedb/` (configurable via `dbPath`)
+- **Format:** LanceDB (Apache Arrow-based columnar storage)
+- **Persistence:** On-disk, survives restarts
+
 ## Files
 
 | File | Purpose |
@@ -147,7 +218,9 @@ openclaw ltm stats             # Show statistics
 | `index.ts` | Core plugin — tools, lifecycle hooks, agentId isolation |
 | `config.ts` | Schema parser, dimensions map, env var resolution |
 | `openclaw.plugin.json` | Plugin manifest with configSchema |
-| `install.sh` | Smart installer with auto-skip dist patching |
+| `install.sh` | Smart installer with auto-skip dist patching (Linux + macOS) |
+| `scripts/openclaw-update.sh` | Full update pipeline (backup → update → re-apply → restart) |
+| `scripts/pre-update-backup.sh` | Pre-update snapshot of plugin, dist, config, and LanceDB data |
 
 ## License
 
