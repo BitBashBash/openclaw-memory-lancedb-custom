@@ -1,68 +1,41 @@
-# OpenClaw Memory LanceDB — Custom Embedding Edition
+# OpenClaw Memory LanceDB — Custom Edition
 
-Drop-in replacement for OpenClaw's bundled `memory-lancedb` plugin with two key additions:
+> LanceDB-backed long-term memory for OpenClaw with **multi-agent isolation**, extended embedding model support, and any OpenAI-compatible endpoint.
 
-1. **Custom embedding endpoint** — Use Ollama, LM Studio, vLLM, or any OpenAI-compatible API instead of being locked to OpenAI
-2. **Multi-agent memory isolation** — Tag memories with `agentId` so multiple agents sharing one OpenClaw instance can't see each other's data
+## What This Adds Over Stock
 
-## Requirements
+| Feature | Stock | Custom |
+|---------|-------|--------|
+| Custom embedding endpoint (baseUrl) | ✅ | ✅ |
+| Explicit dimensions override | ✅ | ✅ |
+| Environment variable resolution (`${ENV_VAR}`) | ✅ | ✅ |
+| **Multi-agent memory isolation (agentId)** | ❌ | ✅ |
+| **Extended embedding dimensions map (12+ models)** | ❌ (2 models) | ✅ |
+| **Graceful 768-dim fallback for unknown models** | ❌ (throws error) | ✅ |
 
-- OpenClaw 2026.2.x+
-- Node.js 22+
-- An OpenAI-compatible embedding endpoint
+### agentId Isolation
 
-## Quick Start
+Each agent passes its name as `agentId` when storing/recalling memories. Memories are filtered so agents only see their own memories plus `"shared"` memories. This prevents cross-contamination between agents like Maya (business ops) and Nova (personal assistant).
 
-### 1. Copy plugin files
+## Compatibility
 
-Replace the bundled plugin source files:
+- **Newer OpenClaw releases**: Install just copies 3 source files. No dist patching needed.
+- **Older OpenClaw releases**: Installer auto-detects and applies dist patches for schema validation bypass.
 
-```bash
-PLUGIN_DIR="$HOME/.npm-global/lib/node_modules/openclaw/extensions/memory-lancedb"
+The installer handles both cases automatically — you don't need to think about it.
 
-# Backup originals
-cp "$PLUGIN_DIR/index.ts" "$PLUGIN_DIR/index.ts.bak"
-cp "$PLUGIN_DIR/config.ts" "$PLUGIN_DIR/config.ts.bak"
-cp "$PLUGIN_DIR/openclaw.plugin.json" "$PLUGIN_DIR/openclaw.plugin.json.bak"
-
-# Copy custom files
-cp index.ts "$PLUGIN_DIR/index.ts"
-cp config.ts "$PLUGIN_DIR/config.ts"
-cp openclaw.plugin.json "$PLUGIN_DIR/openclaw.plugin.json"
-```
-
-### 2. Install LanceDB dependency
+## Quick Install
 
 ```bash
-cd "$HOME/.npm-global/lib/node_modules/openclaw"  # Linux
-# or: cd /opt/homebrew/lib/node_modules/openclaw   # macOS (Homebrew)
-
-npm install @lancedb/lancedb apache-arrow --legacy-peer-deps
-node -e "require('@lancedb/lancedb'); console.log('OK')"
+git clone https://github.com/BitBashBash/openclaw-memory-lancedb-custom.git
+cd openclaw-memory-lancedb-custom
+chmod +x install.sh
+./install.sh
 ```
 
-> **Note:** The `--legacy-peer-deps` flag is needed to avoid peer dependency conflicts with OpenClaw's dev dependencies. If the `node` check fails on macOS, try `npm install @lancedb/lancedb --build-from-source --legacy-peer-deps` (requires Xcode Command Line Tools).
+## Configuration
 
-### 3. Patch the compiled dist (schema validation)
-
-The bundled `dist/` files contain a compiled schema that rejects custom models and baseUrl. Patch it:
-
-```bash
-cd "$HOME/.npm-global/lib/node_modules/openclaw"
-for f in dist/manager-*.js; do
-  if grep -q "text-embedding-3-small" "$f"; then
-    # Remove model enum restriction
-    sed -i 's/"enum":\["text-embedding-3-small","text-embedding-3-large"\]/"type":"string"/g' "$f"
-    # Add baseUrl as accepted property
-    sed -i 's/"additionalProperties":false,"properties":{"apiKey":{"type":"string"},"model"/"properties":{"apiKey":{"type":"string"},"baseUrl":{"type":"string"},"model"/g' "$f"
-    # Remove required apiKey constraint
-    sed -i 's/"required":\["apiKey"\]/"required":[]/g' "$f"
-    echo "Patched: $f"
-  fi
-done
-```
-
-### 4. Configure in openclaw.json
+Add to `~/.openclaw/openclaw.json`:
 
 ```json
 {
@@ -73,12 +46,13 @@ done
         "enabled": true,
         "config": {
           "embedding": {
-            "apiKey": "your-api-key",
+            "apiKey": "ollama",
             "model": "nomic-embed-text-v2-moe",
-            "baseUrl": "https://your-ollama-server:11434/v1"
+            "baseUrl": "http://localhost:11434/v1",
+            "dimensions": 768
           },
-          "autoCapture": true,
-          "autoRecall": true
+          "autoCapture": false,
+          "autoRecall": false
         }
       }
     }
@@ -86,147 +60,94 @@ done
 }
 ```
 
-### 5. Restart
+Then restart: `openclaw gateway restart`
 
-```bash
-openclaw gateway restart
-```
+### Config Reference
 
-### 6. Verify
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `embedding.apiKey` | string | *required* | API key (or `"ollama"` for Ollama). Supports `${ENV_VAR}` |
+| `embedding.model` | string | `text-embedding-3-small` | Embedding model name |
+| `embedding.baseUrl` | string | OpenAI API | Custom endpoint URL. Supports `${ENV_VAR}` |
+| `embedding.dimensions` | number | auto-detected | Explicit vector dimensions (skips model lookup) |
+| `dbPath` | string | `~/.openclaw/memory/lancedb` | LanceDB database path |
+| `autoCapture` | boolean | `false` | Auto-capture important info from conversations |
+| `autoRecall` | boolean | `true` | Auto-inject relevant memories into context |
+| `captureMaxChars` | number | `500` | Max message length for auto-capture (100–10000) |
 
-```bash
-# Check plugin loaded
-grep "memory-lancedb" /tmp/openclaw-1000/openclaw-$(date +%Y-%m-%d).log | tail -5
-
-# Should show:
-# memory-lancedb: plugin registered (db: ..., lazy init)
-# memory-lancedb: initialized (db: ..., model: nomic-embed-text-v2-moe)
-```
-
-## Embedding Providers
-
-Works with any OpenAI-compatible `/v1/embeddings` endpoint:
-
-| Provider | baseUrl | Example Model |
-|----------|---------|---------------|
-| **OpenAI** | *(omit — uses default)* | `text-embedding-3-small` |
-| **Ollama** | `http://localhost:11434/v1` | `nomic-embed-text-v2-moe` |
-| **LM Studio** | `http://localhost:1234/v1` | `nomic-embed-text-v1.5-GGUF` |
-| **vLLM** | `http://localhost:8000/v1` | `BAAI/bge-large-en-v1.5` |
-| **LocalAI** | `http://localhost:8080/v1` | `bert-cpp-minilm-v6` |
-| **text-embeddings-inference** | `http://localhost:8081` | `BAAI/bge-m3` |
-
-### Known Embedding Dimensions (auto-detected)
+### Supported Embedding Models (Built-in Dimensions)
 
 | Model | Dimensions |
-|-------|------------|
+|-------|-----------|
 | `text-embedding-3-small` | 1536 |
 | `text-embedding-3-large` | 3072 |
-| `nomic-embed-text-v2-moe` | 768 |
-| `nomic-embed-text` / `v1.5` | 768 |
+| `text-embedding-ada-002` | 1536 |
+| `gemini-embedding-001` | 3072 |
+| `nomic-embed-text` / `v1.5` / `v2-moe` | 768 |
 | `mxbai-embed-large` | 1024 |
-| `bge-large-en-v1.5` / `bge-m3` | 1024 |
 | `all-minilm` | 384 |
-| Unknown models | 768 (default) |
+| `bge-large-en-v1.5` / `bge-m3` | 1024 |
+| `snowflake-arctic-embed` | 1024 |
+| *any other model* | 768 (fallback) |
 
-If your model uses different dimensions, it will still work — LanceDB adapts to the actual vector size on first write.
+Use the `dimensions` config field to override for models not in this list.
 
-## Multi-Agent Isolation
+## Updating OpenClaw
 
-If you run multiple agents on one OpenClaw instance, use `agentId` to keep their memories separate.
+After running `openclaw update`, re-run the installer to reapply custom files:
 
-### How it works
-
-Each memory is tagged with an `agentId` field. When an agent passes their ID to `memory_recall`, they only see:
-- Memories tagged with their own ID
-- Memories tagged as `"shared"` (no agent specified)
-
-Memories from other agents are filtered out.
-
-### Setup
-
-**1. Disable autoCapture and autoRecall** (they lack agent context):
-
-```json
-"memory-lancedb": {
-  "config": {
-    "autoCapture": false,
-    "autoRecall": false
-  }
-}
+```bash
+cd /path/to/openclaw-memory-lancedb-custom
+git pull
+./install.sh
 ```
 
-**2. Add memory rules to each agent's PLAYBOOK.md or SOUL.md:**
+Or use the automated update script:
 
-```markdown
-## Memory Rules
-- When using memory_store or memory_recall, ALWAYS pass agentId: "your-agent-name"
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPO_DIR="/home/ubuntu/openclaw-memory-lancedb-custom"
+echo "=== OpenClaw Update + Custom LanceDB ==="
+
+# 1. Update OpenClaw
+openclaw update --no-restart --yes
+echo "Updated to: $(openclaw --version 2>&1 | head -1)"
+
+# 2. Pull + reinstall custom plugin
+cd "$REPO_DIR" && git pull --ff-only
+./install.sh
+
+# 3. Restart
+openclaw gateway restart
+echo "=== Done ==="
 ```
-
-**3. Test isolation:**
-
-```
-# Agent A: "Remember my favorite color is blue"     → stored with agentId: "agent-a"
-# Agent B: "What is my favorite color?"              → no results
-# Agent A: "What is my favorite color?"              → "blue"
-```
-
-### Single agent?
-
-If you only have one agent, ignore agentId entirely — everything works without it. Memories are tagged `"shared"` by default.
 
 ## CLI Commands
 
 ```bash
 openclaw ltm list              # Count total memories
-openclaw ltm search "query"    # Search memories
-openclaw ltm stats             # Memory statistics
+openclaw ltm search "query"    # Search memories (--limit N)
+openclaw ltm stats             # Show statistics
 ```
 
-## Tools
-
-The plugin registers three tools available to your agents:
+## Tools Available to Agents
 
 | Tool | Description |
 |------|-------------|
-| `memory_recall` | Search memories by semantic similarity |
-| `memory_store` | Save new information (with deduplication) |
-| `memory_forget` | Delete memories by ID or search (GDPR) |
+| `memory_recall` | Search memories with optional agentId filtering |
+| `memory_store` | Store new memories with agentId tagging and dedup |
+| `memory_forget` | Delete memories by ID or search query (GDPR-compliant) |
 
-## Data Location
+## Files
 
-- **Vector database:** `~/.openclaw/memory/lancedb/` (configurable via `dbPath`)
-- **Format:** LanceDB (Apache Arrow-based columnar storage)
-- **Persistence:** On-disk, survives restarts
-
-## Updating OpenClaw
-
-When you update OpenClaw (`npm update -g openclaw`), the plugin source files and `@lancedb/lancedb` dependency will be overwritten. To restore:
-
-```bash
-PLUGIN_DIR="$HOME/.npm-global/lib/node_modules/openclaw/extensions/memory-lancedb"
-
-# Restore plugin files
-cp /path/to/this/repo/index.ts "$PLUGIN_DIR/index.ts"
-cp /path/to/this/repo/config.ts "$PLUGIN_DIR/config.ts"
-cp /path/to/this/repo/openclaw.plugin.json "$PLUGIN_DIR/openclaw.plugin.json"
-
-# Reinstall LanceDB
-cd "$HOME/.npm-global/lib/node_modules/openclaw"  # or /opt/homebrew/lib/node_modules/openclaw on macOS
-npm install @lancedb/lancedb apache-arrow --legacy-peer-deps
-
-# Re-patch dist
-for f in dist/manager-*.js; do
-  if grep -q "text-embedding-3-small" "$f"; then
-    sed -i 's/"enum":\["text-embedding-3-small","text-embedding-3-large"\]/"type":"string"/g' "$f"
-    sed -i 's/"additionalProperties":false,"properties":{"apiKey":{"type":"string"},"model"/"properties":{"apiKey":{"type":"string"},"baseUrl":{"type":"string"},"model"/g' "$f"
-    sed -i 's/"required":\["apiKey"\]/"required":[]/g' "$f"
-    echo "Patched: $f"
-  fi
-done
-
-openclaw gateway restart
-```
+| File | Purpose |
+|------|---------|
+| `index.ts` | Core plugin — tools, lifecycle hooks, agentId isolation |
+| `config.ts` | Schema parser, dimensions map, env var resolution |
+| `openclaw.plugin.json` | Plugin manifest with configSchema |
+| `install.sh` | Smart installer with auto-skip dist patching |
 
 ## License
 

@@ -16,7 +16,13 @@
     "embedding.baseUrl": {
       "label": "Base URL",
       "placeholder": "https://api.openai.com/v1",
-      "help": "Custom endpoint URL (Ollama, LM Studio, vLLM, or any OpenAI-compatible API)"
+      "help": "Custom endpoint URL (Ollama, LM Studio, vLLM, or any OpenAI-compatible API). Supports ${ENV_VAR} syntax."
+    },
+    "embedding.dimensions": {
+      "label": "Dimensions",
+      "placeholder": "768",
+      "help": "Vector dimensions override for unlisted models (auto-detected for known models)",
+      "advanced": true
     },
     "dbPath": {
       "label": "Database Path",
@@ -52,6 +58,9 @@
           },
           "baseUrl": {
             "type": "string"
+          },
+          "dimensions": {
+            "type": "number"
           }
         },
         "required": ["apiKey"]

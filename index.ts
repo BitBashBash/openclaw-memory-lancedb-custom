@@ -5,13 +5,19 @@
  * Works with any OpenAI-compatible embedding API (Ollama, LM Studio, vLLM, etc.)
  * Supports multi-agent isolation via agentId tagging.
  *
- * Features:
- * - Custom embedding endpoint via baseUrl config
- * - Any embedding model (not locked to OpenAI)
+ * Custom additions over stock OpenClaw memory-lancedb:
  * - Multi-agent memory isolation via agentId
+ * - Extended embedding model dimension map (12+ models)
+ * - Graceful fallback to 768 dimensions for unknown models
+ *
+ * Stock features preserved:
+ * - Custom embedding endpoint via baseUrl config
+ * - Explicit dimensions override for unlisted models
+ * - Environment variable resolution (${ENV_VAR}) for apiKey and baseUrl
  * - Auto-recall and auto-capture via lifecycle hooks
  * - Prompt injection detection
  * - GDPR-compliant memory deletion
+ * - Legacy database path migration
  */
 
 import type * as LanceDB from "@lancedb/lancedb";
@@ -93,6 +99,7 @@ class MemoryDB {
     if (tables.includes(TABLE_NAME)) {
       this.table = await this.db.openTable(TABLE_NAME);
     } else {
+      // Create table with agentId column for multi-agent isolation
       this.table = await this.db.createTable(TABLE_NAME, [
         {
           id: "__schema__",
@@ -145,7 +152,10 @@ class MemoryDB {
       };
     });
 
+    // Apply minimum score filter
     let filtered = mapped.filter((r) => r.score >= minScore);
+
+    // Multi-agent isolation: filter by agentId if provided
     if (agentId) {
       filtered = filtered.filter(
         (r) => !r.entry.agentId || r.entry.agentId === agentId || r.entry.agentId === "shared",
@@ -156,6 +166,7 @@ class MemoryDB {
 
   async delete(id: string): Promise<boolean> {
     await this.ensureInitialized();
+    // Validate UUID format to prevent injection
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     if (!uuidRegex.test(id)) {
       throw new Error(`Invalid memory ID format: ${id}`);
@@ -303,7 +314,9 @@ const memoryPlugin = {
   register(api: OpenClawPluginApi) {
     const cfg = memoryConfigSchema.parse(api.pluginConfig);
     const resolvedDbPath = api.resolvePath(cfg.dbPath!);
-    const vectorDim = vectorDimsForModel(cfg.embedding.model ?? "text-embedding-3-small");
+
+    // Use explicit dimensions if provided, otherwise look up from model map
+    const vectorDim = cfg.embedding.dimensions ?? vectorDimsForModel(cfg.embedding.model ?? "text-embedding-3-small");
     const db = new MemoryDB(resolvedDbPath, vectorDim);
     const embeddings = new Embeddings(cfg.embedding.apiKey, cfg.embedding.model!, cfg.embedding.baseUrl);
 

@@ -8,6 +8,7 @@ export type MemoryConfig = {
     model?: string;
     apiKey: string;
     baseUrl?: string;
+    dimensions?: number;
   };
   dbPath?: string;
   autoCapture?: boolean;
@@ -21,9 +22,32 @@ export type MemoryCategory = (typeof MEMORY_CATEGORIES)[number];
 const DEFAULT_MODEL = "text-embedding-3-small";
 export const DEFAULT_CAPTURE_MAX_CHARS = 500;
 
+// Legacy state directories for database path migration (from stock OpenClaw)
+const LEGACY_STATE_DIRS: string[] = [];
+
 function resolveDefaultDbPath(): string {
   const home = homedir();
-  return join(home, ".openclaw", "memory", "lancedb");
+  const preferred = join(home, ".openclaw", "memory", "lancedb");
+  try {
+    if (fs.existsSync(preferred)) {
+      return preferred;
+    }
+  } catch {
+    // best-effort
+  }
+
+  for (const legacy of LEGACY_STATE_DIRS) {
+    const candidate = join(home, legacy, "memory", "lancedb");
+    try {
+      if (fs.existsSync(candidate)) {
+        return candidate;
+      }
+    } catch {
+      // best-effort
+    }
+  }
+
+  return preferred;
 }
 
 const DEFAULT_DB_PATH = resolveDefaultDbPath();
@@ -31,11 +55,13 @@ const DEFAULT_DB_PATH = resolveDefaultDbPath();
 /**
  * Known embedding dimensions. For unknown models, defaults to 768
  * which covers most open-source models (nomic-embed, BGE, etc.)
+ * Use the `dimensions` config field to override for unlisted models.
  */
 const EMBEDDING_DIMENSIONS: Record<string, number> = {
   "text-embedding-3-small": 1536,
   "text-embedding-3-large": 3072,
   "text-embedding-ada-002": 1536,
+  "gemini-embedding-001": 3072,
   "nomic-embed-text": 768,
   "nomic-embed-text-v1.5": 768,
   "nomic-embed-text-v2-moe": 768,
@@ -70,7 +96,10 @@ function resolveEnvVars(value: string): string {
 
 function resolveEmbeddingModel(embedding: Record<string, unknown>): string {
   const model = typeof embedding.model === "string" ? embedding.model : DEFAULT_MODEL;
-  vectorDimsForModel(model);
+  // Skip dimension validation when explicit dimensions are provided
+  if (typeof embedding.dimensions !== "number") {
+    vectorDimsForModel(model);
+  }
   return model;
 }
 
@@ -90,7 +119,7 @@ export const memoryConfigSchema = {
     if (!embedding || typeof embedding.apiKey !== "string") {
       throw new Error("embedding.apiKey is required");
     }
-    assertAllowedKeys(embedding, ["apiKey", "model", "baseUrl"], "embedding config");
+    assertAllowedKeys(embedding, ["apiKey", "model", "baseUrl", "dimensions"], "embedding config");
 
     const model = resolveEmbeddingModel(embedding);
 
@@ -106,9 +135,10 @@ export const memoryConfigSchema = {
     return {
       embedding: {
         provider: "openai",
-        baseUrl: typeof embedding.baseUrl === "string" ? embedding.baseUrl : undefined,
+        baseUrl: typeof embedding.baseUrl === "string" ? resolveEnvVars(embedding.baseUrl) : undefined,
         model,
         apiKey: resolveEnvVars(embedding.apiKey),
+        dimensions: typeof embedding.dimensions === "number" ? embedding.dimensions : undefined,
       },
       dbPath: typeof cfg.dbPath === "string" ? cfg.dbPath : DEFAULT_DB_PATH,
       autoCapture: cfg.autoCapture === true,
@@ -131,7 +161,14 @@ export const memoryConfigSchema = {
     "embedding.baseUrl": {
       label: "Base URL",
       placeholder: "https://api.openai.com/v1",
-      help: "Custom endpoint URL (Ollama, LM Studio, vLLM, or any OpenAI-compatible API)",
+      help: "Custom endpoint URL (Ollama, LM Studio, vLLM, or any OpenAI-compatible API). Supports ${ENV_VAR} syntax.",
+      advanced: true,
+    },
+    "embedding.dimensions": {
+      label: "Dimensions",
+      placeholder: "768",
+      help: "Vector dimensions override for unlisted models (auto-detected for known models)",
+      advanced: true,
     },
     dbPath: {
       label: "Database Path",
