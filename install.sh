@@ -40,7 +40,15 @@ elif [ -d "/usr/local/lib/node_modules/openclaw" ]; then
 else
   OPENCLAW_DIR="$(npm root -g)/openclaw"
 fi
-PLUGIN_DIR="$OPENCLAW_DIR/extensions/memory-lancedb"
+
+# Auto-detect plugin path (v2026.4+ moved extensions into dist/)
+if [ -d "$OPENCLAW_DIR/extensions/memory-lancedb" ]; then
+  PLUGIN_DIR="$OPENCLAW_DIR/extensions/memory-lancedb"
+elif [ -d "$OPENCLAW_DIR/dist/extensions/memory-lancedb" ]; then
+  PLUGIN_DIR="$OPENCLAW_DIR/dist/extensions/memory-lancedb"
+else
+  PLUGIN_DIR="$OPENCLAW_DIR/dist/extensions/memory-lancedb"
+fi
 
 echo "=== OpenClaw Memory LanceDB Custom Installer v2.0.0 ==="
 echo ""

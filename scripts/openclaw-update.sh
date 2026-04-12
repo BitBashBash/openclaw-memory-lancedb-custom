@@ -43,7 +43,7 @@ echo ""
 # 4. Re-apply custom plugin
 echo "[4/5] Re-applying custom LanceDB plugin..."
 cd "$REPO_DIR"
-chmod +x install.sh
+chmod +x install.sh scripts/*.sh 2>/dev/null || true
 ./install.sh
 echo ""
 

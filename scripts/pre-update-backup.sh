@@ -20,7 +20,14 @@ else
   OC_DIR="$(npm root -g)/openclaw"
 fi
 
-PLUGIN_DIR="$OC_DIR/extensions/memory-lancedb"
+# Auto-detect plugin path (v2026.4+ moved extensions into dist/)
+if [ -d "$OC_DIR/extensions/memory-lancedb" ]; then
+  PLUGIN_DIR="$OC_DIR/extensions/memory-lancedb"
+elif [ -d "$OC_DIR/dist/extensions/memory-lancedb" ]; then
+  PLUGIN_DIR="$OC_DIR/dist/extensions/memory-lancedb"
+else
+  PLUGIN_DIR="$OC_DIR/dist/extensions/memory-lancedb"
+fi
 CONFIG_DIR="$HOME/.openclaw"
 CUSTOM_REPO="$HOME/openclaw-memory-lancedb-custom"
 

@@ -21,10 +21,11 @@
 
 ## Compatibility
 
+- **OpenClaw v2026.4+**: Extensions moved to `dist/extensions/`. Installer auto-detects the new path.
 - **Newer OpenClaw releases**: Stock supports baseUrl/dimensions natively — install just copies 3 source files. No dist patching needed.
 - **Older OpenClaw releases**: Installer auto-detects and applies dist patches for schema validation bypass.
 
-The installer handles both cases automatically — you don't need to think about it.
+The installer and helper scripts handle all cases automatically — you don't need to think about it.
 
 ## Quick Install
 
@@ -218,9 +219,9 @@ openclaw ltm stats             # Memory statistics
 | `index.ts` | Core plugin — tools, lifecycle hooks, agentId isolation |
 | `config.ts` | Schema parser, dimensions map, env var resolution |
 | `openclaw.plugin.json` | Plugin manifest with configSchema |
-| `install.sh` | Smart installer with auto-skip dist patching (Linux + macOS) |
+| `install.sh` | Smart installer with auto-detect plugin path and auto-skip dist patching (Linux + macOS) |
 | `scripts/openclaw-update.sh` | Full update pipeline (backup → update → re-apply → restart) |
-| `scripts/pre-update-backup.sh` | Pre-update snapshot of plugin, dist, config, and LanceDB data |
+| `scripts/pre-update-backup.sh` | Pre-update snapshot of plugin, dist, config, and LanceDB data (auto-detects plugin path) |
 
 ## License
 
